@@ -22,6 +22,8 @@ export default {
     if (request.method === 'POST' && url.pathname === '/webhook') {
       try {
         const update = await request.json();
+        // Initialize bot before handling update manually
+        await bot.init();
         // Use ctx.waitUntil to ensure background tasks like KV writes finish
         ctx.waitUntil(bot.handleUpdate(update));
         return new Response('ok', { status: 200 });
