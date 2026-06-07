@@ -13,4 +13,4 @@ compatibility_date = "2024-06-07"
 
 [[kv_namespaces]]
 binding = "BOT_SESSIONS"
-id = "put_your_kv_id_here"
+id = "d0876f845bdd4fffbad1248cdb5a6c40"
