@@ -73,17 +73,17 @@ export function createBot(token, env) {
     .text('💾 Backup KV', 'action_backup');
 
   const menuText = `👋 Welcome to Sink Bot V2!\n\n` +
-    `**⚡️ Create Link:**\n` +
+    `*⚡️ Create Link:*\n` +
     `\`/create <url>\`\n` +
     `\`/create <url> --slug <custom-slug>\`\n` +
     `\`/create <url> --password <secret>\`\n\n` +
-    `**📝 Manage Links:**\n` +
+    `*📝 Manage Links:*\n` +
     `✏️ \`/edit <slug> <new-url> [--password 123]\`\n` +
     `♻️ \`/upsert <slug> <url>\`\n` +
     `🔍 \`/query <slug>\` - Get details\n` +
     `🔎 \`/search <text>\`\n` +
     `🗑 \`/delete <slug>\`\n\n` +
-    `**📊 Advanced:**\n` +
+    `*📊 Advanced:*\n` +
     `/metrics, /events, /export, /import`;
 
   // Welcome
@@ -125,7 +125,7 @@ export function createBot(token, env) {
     try {
       const res = await getApi()[actionMethod](payload);
       const link = res.link || res;
-      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Success!**\n\n🔗 Short: ${env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
+      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ *Success!*\n\n🔗 Short: ${env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
     } catch (e) {
       await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Failed: ${e.message}`);
     }
@@ -141,7 +141,7 @@ export function createBot(token, env) {
     try {
       const res = await getApi().queryLink(slug);
       const link = res.link || res;
-      await ctx.reply(`🔍 **Details:**\nSlug: \`${link.slug}\`\nTarget: ${link.url}\nComment: ${link.comment || '-'}`, { parse_mode: 'Markdown' });
+      await ctx.reply(`🔍 *Details:*\nSlug: \`${link.slug}\`\nTarget: ${link.url}\nComment: ${link.comment || '-'}`, { parse_mode: 'Markdown' });
     } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
   });
 
@@ -153,7 +153,7 @@ export function createBot(token, env) {
       const links = res.links || res || [];
       if (!links.length) return ctx.reply('📭 No results.');
       const text = links.map(l => `🏷 \`${l.slug}\` -> ${l.url}`).join('\n');
-      await ctx.reply(`🔎 **Search Results:**\n\n${text}`, { parse_mode: 'Markdown', disable_web_page_preview: true });
+      await ctx.reply(`🔎 *Search Results:*\n\n${text}`, { parse_mode: 'Markdown', disable_web_page_preview: true });
     } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
   });
 
@@ -171,7 +171,7 @@ export function createBot(token, env) {
     const dim = ctx.match.trim() || 'os';
     try {
       const res = await getApi().getMetrics(dim);
-      let text = `📊 **Metrics (${dim}):**\n`;
+      let text = `📊 *Metrics (${dim}):*\n`;
       (res.metrics || res).slice(0, 15).forEach(m => { text += `- ${m.element}: ${m.views}\n`; });
       await ctx.reply(text, { parse_mode: 'Markdown' });
     } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
@@ -193,8 +193,8 @@ export function createBot(token, env) {
       const text = links.map(l => `🏷 \`${l.slug}\` -> ${l.url}`).join('\n');
       const opt = { parse_mode: 'Markdown', disable_web_page_preview: true, reply_markup: keyboard };
       
-      if (ctx.callbackQuery) await ctx.editMessageText(`📋 **Recent Links:**\n\n${text}`, opt);
-      else await ctx.reply(`📋 **Recent Links:**\n\n${text}`, opt);
+      if (ctx.callbackQuery) await ctx.editMessageText(`📋 *Recent Links:*\n\n${text}`, opt);
+      else await ctx.reply(`📋 *Recent Links:*\n\n${text}`, opt);
     } catch (e) { 
       if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: `❌ Failed: ${e.message}`, show_alert: true });
       else await ctx.reply(`❌ Failed: ${e.message}`); 
@@ -219,7 +219,7 @@ export function createBot(token, env) {
   bot.command('events', async (ctx) => {
     try {
       const res = await getApi().getEvents();
-      let text = `⚡️ **Recent Events:**\n`;
+      let text = `⚡️ *Recent Events:*\n`;
       (res.events || res).slice(0, 10).forEach(e => { text += `- \`${e.slug}\`: ${e.browser} on ${e.os}\n`; });
       await ctx.reply(text, { parse_mode: 'Markdown' });
     } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
@@ -264,7 +264,7 @@ export function createBot(token, env) {
         
         const msg = await ctx.reply('⏳ Importing...');
         const res = await getApi().importLinks(data);
-        await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Import Complete!**\nInserted: ${res.inserted || 'N/A'}`);
+        await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ *Import Complete!*\nInserted: ${res.inserted || 'N/A'}`, { parse_mode: 'Markdown' });
       } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
     }
   });
@@ -273,11 +273,11 @@ export function createBot(token, env) {
     const data = ctx.callbackQuery.data;
     try {
       if (data === 'action_menu') {
-        await ctx.editMessageText(menuText, { reply_markup: getMenuKeyboard() });
+        await ctx.editMessageText(menuText, { reply_markup: getMenuKeyboard(), parse_mode: 'Markdown' });
       } else if (data === 'action_stats') {
         const counters = await getApi().getCounters();
         const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'action_menu');
-        await ctx.editMessageText(`📊 **Sink Statistics:**\n🔗 Links: ${counters.links || 0}\n👀 Clicks: ${counters.clicks || 0}\n🌍 Visitors: ${counters.uniqueVisitors || 0}`, { parse_mode: 'Markdown', reply_markup: keyboard });
+        await ctx.editMessageText(`📊 *Sink Statistics:*\n🔗 Links: ${counters.links || 0}\n👀 Clicks: ${counters.clicks || 0}\n🌍 Visitors: ${counters.uniqueVisitors || 0}`, { parse_mode: 'Markdown', reply_markup: keyboard });
       } else if (data === 'action_list') {
         await handleList(ctx);
       } else if (data === 'action_backup') {
