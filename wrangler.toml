@@ -1,0 +1,12 @@
+name = "sink-telegram-bot"
+main = "src/index.js"
+compatibility_date = "2024-06-07"
+
+# These should be set via `wrangler secret put` or in the Cloudflare Dashboard,
+# but we declare them here for local dev (wrangler.toml vars are public in repo, 
+# so leave secrets empty or use .dev.vars for local testing).
+[vars]
+# TELEGRAM_BOT_TOKEN = "your-bot-token"
+# SINK_API_URL = "https://your-sink-domain.com"
+# SINK_API_TOKEN = "your-sink-token"
+# ALLOWED_USER_IDS = "123456789,987654321" # Comma-separated list of allowed Telegram user IDs
