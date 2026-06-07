@@ -1,7 +1,5 @@
-import { Bot, InlineKeyboard, session } from 'grammy';
-import { conversations, createConversation } from '@grammyjs/conversations';
+import { Bot, InlineKeyboard } from 'grammy';
 import { SinkAPI } from './sink.js';
-import { KvAdapter } from './kv-adapter.js';
 
 function parseFlags(argsStr) {
   const args = argsStr.match(/(?:[^\s"']+|["'][^"']*["'])+/g) || [];
@@ -43,41 +41,7 @@ function parseFlags(argsStr) {
   return { payload, nonFlags };
 }
 
-// Conversation Builder
-async function createLinkConversation(conversation, ctx) {
-  await ctx.reply("Let's create a link! First, what is the target URL?");
-  const urlCtx = await conversation.wait();
-  const url = urlCtx.message?.text;
-  if (!url) return ctx.reply("Action cancelled.");
-
-  await ctx.reply("Do you want a custom slug? (Type the slug, or 'skip' to auto-generate)");
-  const slugCtx = await conversation.wait();
-  const slugInput = slugCtx.message?.text;
-  const slug = slugInput.toLowerCase() !== 'skip' ? slugInput : undefined;
-
-  await ctx.reply("Any comment/note for this link? (Type note, or 'skip')");
-  const commentCtx = await conversation.wait();
-  const commentInput = commentCtx.message?.text;
-  const comment = commentInput.toLowerCase() !== 'skip' ? commentInput : undefined;
-
-  await ctx.reply("Do you want to add a password? (Type password, or 'skip')");
-  const pwdCtx = await conversation.wait();
-  const pwdInput = pwdCtx.message?.text;
-  const password = pwdInput.toLowerCase() !== 'skip' ? pwdInput : undefined;
-
-  const payload = { url, slug, comment, password };
-
-  const msg = await ctx.reply('⏳ Creating link...');
-  try {
-    const api = new SinkAPI(ctx.env.SINK_API_URL, ctx.env.SINK_API_TOKEN);
-    const res = await api.createLink(payload);
-    const link = res.link || res;
-    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Link Created!**\n\n🔗 Short: ${ctx.env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
-  } catch (e) {
-    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Failed: ${e.message}`);
-  }
-}
-
+// No conversational bot due to KV eventual consistency limitations.
 export function createBot(token, env) {
   const bot = new Bot(token);
 
@@ -92,14 +56,7 @@ export function createBot(token, env) {
     await next();
   });
 
-  if (env.BOT_SESSIONS) {
-    bot.use(session({
-      initial: () => ({}),
-      storage: new KvAdapter(env.BOT_SESSIONS)
-    }));
-    bot.use(conversations());
-    bot.use(createConversation(createLinkConversation, 'create_chat'));
-  }
+  // Session middleware removed.
 
   const getApi = () => new SinkAPI(env.SINK_API_URL, env.SINK_API_TOKEN);
 
@@ -116,25 +73,26 @@ export function createBot(token, env) {
     .text('💾 Backup KV', 'action_backup');
 
   const menuText = `👋 Welcome to Sink Bot V2!\n\n` +
-    `Commands:\n` +
-    `➕ /create_chat - Create link step-by-step\n` +
-    `➕ /create <url> [--slug xyz] [--password 123]\n` +
-    `✏️ /edit <slug> <url> [--password 123]\n` +
-    `♻️ /upsert <slug> <url>\n` +
-    `🔍 /query <slug> - Get details\n` +
-    `🔎 /search <text>\n` +
-    `🗑 /delete <slug>\n\n` +
-    `**Advanced:**\n` +
-    `/metrics, /views, /events, /locations, /export, /import`;
+    `**⚡️ Create Link:**\n` +
+    `\`/create <url>\`\n` +
+    `\`/create <url> --slug <custom-slug>\`\n` +
+    `\`/create <url> --password <secret>\`\n\n` +
+    `**📝 Manage Links:**\n` +
+    `✏️ \`/edit <slug> <new-url> [--password 123]\`\n` +
+    `♻️ \`/upsert <slug> <url>\`\n` +
+    `🔍 \`/query <slug>\` - Get details\n` +
+    `🔎 \`/search <text>\`\n` +
+    `🗑 \`/delete <slug>\`\n\n` +
+    `**📊 Advanced:**\n` +
+    `/metrics, /events, /export, /import`;
 
   // Welcome
   bot.command('start', async (ctx) => {
-    // Tự động cài đặt Menu cho bot chạy ngầm
-    ctx.waitUntil(ctx.api.setMyCommands([
+    // Tự động cài đặt Menu cho bot (bỏ ctx.waitUntil vì không chạy ngầm được ở đây)
+    ctx.api.setMyCommands([
       { command: 'start', description: 'Show main menu' },
-      { command: 'create_chat', description: 'Create link step-by-step' },
-      { command: 'create', description: 'Create link fast' },
-      { command: 'edit', description: 'Edit link' },
+      { command: 'create', description: 'Create a new short link' },
+      { command: 'edit', description: 'Edit an existing link' },
       { command: 'upsert', description: 'Create or edit link' },
       { command: 'query', description: 'Get link details' },
       { command: 'search', description: 'Search links' },
@@ -142,14 +100,9 @@ export function createBot(token, env) {
       { command: 'list', description: 'List recent links' },
       { command: 'stats', description: 'Show stats metrics' },
       { command: 'events', description: 'Show recent events logs' },
-    ]).catch(console.error));
+    ]).catch(console.error);
 
-    await ctx.reply(menuText, { reply_markup: getMenuKeyboard() });
-  });
-
-  bot.command('create_chat', async (ctx) => {
-    if (!env.BOT_SESSIONS) return ctx.reply("❌ KV binding `BOT_SESSIONS` is not configured.");
-    await ctx.conversation.enter('create_chat');
+    await ctx.reply(menuText, { reply_markup: getMenuKeyboard(), parse_mode: 'Markdown' });
   });
 
   const handleLinkAction = async (ctx, actionName, actionMethod) => {
