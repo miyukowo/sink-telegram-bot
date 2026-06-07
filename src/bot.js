@@ -86,11 +86,11 @@ export function createBot(token, env) {
     `*📊 Advanced:*\n` +
     `/metrics, /events, /export, /import`;
 
-  // Welcome
-  bot.command('start', async (ctx) => {
+  const handleStart = async (ctx) => {
     // Tự động cài đặt Menu cho bot (bỏ ctx.waitUntil vì không chạy ngầm được ở đây)
     ctx.api.setMyCommands([
       { command: 'start', description: 'Show main menu' },
+      { command: 'help', description: 'Show help and commands' },
       { command: 'create', description: 'Create a new short link' },
       { command: 'edit', description: 'Edit an existing link' },
       { command: 'upsert', description: 'Create or edit link' },
@@ -103,7 +103,10 @@ export function createBot(token, env) {
     ]).catch(console.error);
 
     await ctx.reply(menuText, { reply_markup: getMenuKeyboard(), parse_mode: 'Markdown' });
-  });
+  };
+
+  bot.command('start', handleStart);
+  bot.command('help', handleStart);
 
   const handleLinkAction = async (ctx, actionName, actionMethod) => {
     const match = ctx.match.trim();
