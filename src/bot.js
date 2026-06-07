@@ -199,7 +199,7 @@ export function createBot(token, env) {
   });
 
   // Analytics & Logs
-  bot.command('metrics', async (ctx) => {
+  const handleMetrics = async (ctx) => {
     const dim = ctx.match.trim() || 'os';
     try {
       const res = await getApi().getMetrics(dim);
@@ -207,6 +207,33 @@ export function createBot(token, env) {
       (res.metrics || res).slice(0, 15).forEach(m => { text += `- ${m.element}: ${m.views}\n`; });
       await ctx.reply(text, { parse_mode: 'Markdown' });
     } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  };
+  bot.command('metrics', handleMetrics);
+  bot.command('stats', handleMetrics); // Alias
+
+  const handleList = async (ctx) => {
+    try {
+      const res = await getApi().listLinks(1, 10);
+      const links = Array.isArray(res) ? res : res.links || res.records || [];
+      if (!links.length) return ctx.reply('📭 No links found.');
+      const text = links.map(l => `🏷 \`${l.slug}\` -> ${l.url}`).join('\n');
+      await ctx.reply(`📋 **Recent Links:**\n\n${text}`, { parse_mode: 'Markdown', disable_web_page_preview: true });
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  };
+  bot.command('list', handleList);
+  bot.command('lists', handleList); // Alias
+
+  bot.command('testkv', async (ctx) => {
+    if (!env.BOT_SESSIONS || typeof env.BOT_SESSIONS.put !== 'function') {
+      return ctx.reply("❌ KV BOT_SESSIONS is not configured correctly.");
+    }
+    try {
+      await env.BOT_SESSIONS.put('test_key', 'it works', { expirationTtl: 60 });
+      const val = await env.BOT_SESSIONS.get('test_key');
+      await ctx.reply(`✅ KV Test successful! Read value: ${val}`);
+    } catch (e) {
+      await ctx.reply(`❌ KV Test failed: ${e.message}`);
+    }
   });
 
   bot.command('events', async (ctx) => {
@@ -285,7 +312,7 @@ export function createBot(token, env) {
 
   bot.on('message', async (ctx) => {
     // Catch-all to detect if conversations are failing to intercept messages
-    await ctx.reply("Lỗi: Bot đã nhận được tin nhắn của bạn nhưng không hiểu lệnh này (hoặc phiên chat đã bị huỷ). Vui lòng gõ /start để bắt đầu lại.");
+    await ctx.reply("Lỗi: Bot không hiểu lệnh này (hoặc phiên chat đã bị huỷ do Cloudflare KV lưu không kịp).\nVui lòng gõ lại /start để bắt đầu lại, hoặc dùng lệnh 1 dòng (ví dụ /create https://google.com).");
   });
 
   return bot;
