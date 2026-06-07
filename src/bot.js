@@ -14,8 +14,8 @@ function parseFlags(argsStr) {
     } else if (currentKey) {
       let val = arg.replace(/^["']|["']$/g, '');
       if (val === 'false') val = false;
-      if (val === 'true') val = true;
-      if (!isNaN(val) && val.trim() !== '') val = Number(val);
+      else if (val === 'true') val = true;
+      else if (currentKey === 'expiration' && !isNaN(val) && val.trim() !== '') val = Number(val);
       
       if (flags[currentKey] === true) {
         flags[currentKey] = val;
