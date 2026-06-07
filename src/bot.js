@@ -108,28 +108,43 @@ export function createBot(token, env) {
     err.ctx.reply(`❌ Error: ${err.error.message || err.error}`).catch(() => {});
   });
 
+  // Menu configuration
+  const getMenuKeyboard = () => new InlineKeyboard()
+    .text('📊 Stats', 'action_stats')
+    .text('📋 List Links', 'action_list')
+    .row()
+    .text('💾 Backup KV', 'action_backup');
+
+  const menuText = `👋 Welcome to Sink Bot V2!\n\n` +
+    `Commands:\n` +
+    `➕ /create_chat - Create link step-by-step\n` +
+    `➕ /create <url> [--slug xyz] [--password 123]\n` +
+    `✏️ /edit <slug> <url> [--password 123]\n` +
+    `♻️ /upsert <slug> <url>\n` +
+    `🔍 /query <slug> - Get details\n` +
+    `🔎 /search <text>\n` +
+    `🗑 /delete <slug>\n\n` +
+    `**Advanced:**\n` +
+    `/metrics, /views, /events, /locations, /export, /import`;
+
   // Welcome
   bot.command('start', async (ctx) => {
-    const keyboard = new InlineKeyboard()
-      .text('📊 Stats', 'action_stats')
-      .text('📋 List Links', 'action_list')
-      .row()
-      .text('💾 Backup KV', 'action_backup');
-      
-    await ctx.reply(
-      `👋 Welcome to Sink Bot V2!\n\n` +
-      `Commands:\n` +
-      `➕ /create_chat - Create link step-by-step\n` +
-      `➕ /create <url> [--slug xyz] [--password 123]\n` +
-      `✏️ /edit <slug> <url> [--password 123]\n` +
-      `♻️ /upsert <slug> <url>\n` +
-      `🔍 /query <slug> - Get details\n` +
-      `🔎 /search <text>\n` +
-      `🗑 /delete <slug>\n\n` +
-      `**Advanced:**\n` +
-      `/metrics, /views, /events, /locations, /export, /import`,
-      { reply_markup: keyboard }
-    );
+    // Tự động cài đặt Menu cho bot chạy ngầm
+    ctx.waitUntil(ctx.api.setMyCommands([
+      { command: 'start', description: 'Show main menu' },
+      { command: 'create_chat', description: 'Create link step-by-step' },
+      { command: 'create', description: 'Create link fast' },
+      { command: 'edit', description: 'Edit link' },
+      { command: 'upsert', description: 'Create or edit link' },
+      { command: 'query', description: 'Get link details' },
+      { command: 'search', description: 'Search links' },
+      { command: 'delete', description: 'Delete link' },
+      { command: 'list', description: 'List recent links' },
+      { command: 'stats', description: 'Show stats metrics' },
+      { command: 'events', description: 'Show recent events logs' },
+    ]).catch(console.error));
+
+    await ctx.reply(menuText, { reply_markup: getMenuKeyboard() });
   });
 
   bot.command('create_chat', async (ctx) => {
@@ -215,10 +230,22 @@ export function createBot(token, env) {
     try {
       const res = await getApi().listLinks(1, 10);
       const links = Array.isArray(res) ? res : res.links || res.records || [];
-      if (!links.length) return ctx.reply('📭 No links found.');
+      const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'action_menu');
+      
+      if (!links.length) {
+        if (ctx.callbackQuery) return ctx.editMessageText('📭 No links found.', { reply_markup: keyboard });
+        return ctx.reply('📭 No links found.', { reply_markup: keyboard });
+      }
+      
       const text = links.map(l => `🏷 \`${l.slug}\` -> ${l.url}`).join('\n');
-      await ctx.reply(`📋 **Recent Links:**\n\n${text}`, { parse_mode: 'Markdown', disable_web_page_preview: true });
-    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+      const opt = { parse_mode: 'Markdown', disable_web_page_preview: true, reply_markup: keyboard };
+      
+      if (ctx.callbackQuery) await ctx.editMessageText(`📋 **Recent Links:**\n\n${text}`, opt);
+      else await ctx.reply(`📋 **Recent Links:**\n\n${text}`, opt);
+    } catch (e) { 
+      if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: `❌ Failed: ${e.message}`, show_alert: true });
+      else await ctx.reply(`❌ Failed: ${e.message}`); 
+    }
   };
   bot.command('list', handleList);
   bot.command('lists', handleList); // Alias
@@ -292,18 +319,25 @@ export function createBot(token, env) {
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
-      if (data === 'action_stats') {
+      if (data === 'action_menu') {
+        await ctx.editMessageText(menuText, { reply_markup: getMenuKeyboard() });
+      } else if (data === 'action_stats') {
         const counters = await getApi().getCounters();
-        await ctx.editMessageText(`📊 **Sink Statistics:**\n🔗 Links: ${counters.links || 0}\n👀 Clicks: ${counters.clicks || 0}\n🌍 Visitors: ${counters.uniqueVisitors || 0}`, { parse_mode: 'Markdown' });
+        const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'action_menu');
+        await ctx.editMessageText(`📊 **Sink Statistics:**\n🔗 Links: ${counters.links || 0}\n👀 Clicks: ${counters.clicks || 0}\n🌍 Visitors: ${counters.uniqueVisitors || 0}`, { parse_mode: 'Markdown', reply_markup: keyboard });
+      } else if (data === 'action_list') {
+        await handleList(ctx);
       } else if (data === 'action_backup') {
         await getApi().triggerBackup();
         await ctx.answerCallbackQuery({ text: '✅ Backup triggered!', show_alert: true });
       } else if (data.startsWith('confirm_delete_')) {
         const slug = data.replace('confirm_delete_', '');
         await getApi().deleteLink(slug);
-        await ctx.editMessageText(`✅ Deleted \`${slug}\``, { parse_mode: 'Markdown' });
+        const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'action_menu');
+        await ctx.editMessageText(`✅ Deleted \`${slug}\``, { parse_mode: 'Markdown', reply_markup: keyboard });
       } else if (data === 'cancel_delete') {
-        await ctx.editMessageText('❌ Cancelled.');
+        const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'action_menu');
+        await ctx.editMessageText('❌ Cancelled.', { reply_markup: keyboard });
       } else {
         await ctx.answerCallbackQuery();
       }
