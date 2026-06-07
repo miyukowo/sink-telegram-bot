@@ -21,7 +21,10 @@ export default {
     // Route for the Telegram Webhook
     if (request.method === 'POST' && url.pathname === '/webhook') {
       try {
-        return await webhookCallback(bot, 'cloudflare-mod')(request);
+        const update = await request.json();
+        // Use ctx.waitUntil to ensure background tasks like KV writes finish
+        ctx.waitUntil(bot.handleUpdate(update));
+        return new Response('ok', { status: 200 });
       } catch (err) {
         console.error('Webhook error:', err);
         return new Response('Webhook handling error', { status: 500 });

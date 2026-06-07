@@ -262,7 +262,6 @@ export function createBot(token, env) {
     }
   });
 
-  // Callbacks for inline menus
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
@@ -282,6 +281,11 @@ export function createBot(token, env) {
         await ctx.answerCallbackQuery();
       }
     } catch (e) { await ctx.answerCallbackQuery({ text: `❌ Error: ${e.message}`, show_alert: true }); }
+  });
+
+  bot.on('message', async (ctx) => {
+    // Catch-all to detect if conversations are failing to intercept messages
+    await ctx.reply("Lỗi: Bot đã nhận được tin nhắn của bạn nhưng không hiểu lệnh này (hoặc phiên chat đã bị huỷ). Vui lòng gõ /start để bắt đầu lại.");
   });
 
   return bot;
