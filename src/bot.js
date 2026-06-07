@@ -90,7 +90,7 @@ export function createBot(token, env) {
     // Tự động cài đặt Menu cho bot (bỏ ctx.waitUntil vì không chạy ngầm được ở đây)
     ctx.api.setMyCommands([
       { command: 'start', description: 'Show main menu' },
-      { command: 'help', description: 'Show help and commands' },
+      { command: 'help', description: 'Show detailed flags and help' },
       { command: 'create', description: 'Create a new short link' },
       { command: 'edit', description: 'Edit an existing link' },
       { command: 'upsert', description: 'Create or edit link' },
@@ -105,12 +105,36 @@ export function createBot(token, env) {
     await ctx.reply(menuText, { reply_markup: getMenuKeyboard(), parse_mode: 'Markdown' });
   };
 
+  const helpText = `📖 *Detailed Help & Flags*\n\n` +
+    `You can append flags to \`/create\`, \`/edit\`, and \`/upsert\` commands to customize your links.\n\n` +
+    `*📌 Common Flags:*\n` +
+    `\`--slug "my-link"\` (Custom alias)\n` +
+    `\`--password "123"\` (Protect link)\n` +
+    `\`--comment "Note"\` (Internal note)\n` +
+    `\`--expiration 1718000000\` (Unix timestamp)\n\n` +
+    `*🌍 Device & Geo Routing:*\n` +
+    `\`--apple "https://..."\` (iOS redirect)\n` +
+    `\`--google "https://..."\` (Android redirect)\n` +
+    `\`--geo.US "https://..."\` (Route by Country Code)\n\n` +
+    `*🖼 SEO / OpenGraph:*\n` +
+    `\`--title "My Site"\`\n` +
+    `\`--description "Desc"\`\n` +
+    `\`--image "https://..."\`\n\n` +
+    `*⚙️ Advanced Toggles:*\n` +
+    `\`--cloaking true\` (Mask destination URL)\n` +
+    `\`--redirectWithQuery true\` (Pass URL params)\n\n` +
+    `*💡 Examples:*\n` +
+    `\`/create https://google.com --slug gg --password 123 --comment "Test"\`\n` +
+    `\`/edit my-link https://yahoo.com --cloaking true\``;
+
   bot.command('start', handleStart);
-  bot.command('help', handleStart);
+  bot.command('help', async (ctx) => {
+    await ctx.reply(helpText, { parse_mode: 'Markdown', disable_web_page_preview: true });
+  });
 
   const handleLinkAction = async (ctx, actionName, actionMethod) => {
     const match = ctx.match.trim();
-    if (!match) return ctx.reply(`❌ Usage: /${actionName} <url or slug depending on command> [--flags]`);
+    if (!match) return ctx.reply(`❌ Usage: /${actionName} <url or slug> [--flags]\n👉 Type /help to see all available flags.`);
     
     const { payload, nonFlags } = parseFlags(match);
     
