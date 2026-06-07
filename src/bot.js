@@ -69,10 +69,10 @@ async function createLinkConversation(conversation, ctx) {
 
   const msg = await ctx.reply('⏳ Creating link...');
   try {
-    const api = new SinkAPI(process.env.SINK_API_URL, process.env.SINK_API_TOKEN);
+    const api = new SinkAPI(ctx.env.SINK_API_URL, ctx.env.SINK_API_TOKEN);
     const res = await api.createLink(payload);
     const link = res.link || res;
-    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Link Created!**\n\n🔗 Short: ${process.env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
+    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Link Created!**\n\n🔗 Short: ${ctx.env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
   } catch (e) {
     await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Failed: ${e.message}`);
   }
@@ -80,11 +80,9 @@ async function createLinkConversation(conversation, ctx) {
 
 export function createBot(token, env) {
   const bot = new Bot(token);
-  // Store env in process.env for conversation scope
-  process.env.SINK_API_URL = env.SINK_API_URL;
-  process.env.SINK_API_TOKEN = env.SINK_API_TOKEN;
 
   bot.use(async (ctx, next) => {
+    ctx.env = env; // Attach env to context for conversations
     const allowedUsersStr = env.ALLOWED_USER_IDS || '';
     const allowedUsers = allowedUsersStr.split(',').map(u => u.trim()).filter(Boolean);
     if (allowedUsers.length > 0) {
