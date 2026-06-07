@@ -146,10 +146,17 @@ export function createBot(token, env) {
       if (nonFlags[1]) payload.url = nonFlags[1];
     }
 
-    if (!payload.url && actionName !== 'edit') return ctx.reply("❌ Target URL is required.");
+    if (!payload.url && actionName === 'create') return ctx.reply("❌ Target URL is required for creating a link.");
 
     const msg = await ctx.reply('⏳ Processing...');
     try {
+      if ((actionName === 'edit' || actionName === 'upsert') && !payload.url) {
+        const existing = await getApi().queryLink(payload.slug);
+        const linkData = existing.link || existing;
+        if (!linkData || !linkData.url) throw new Error("Could not fetch existing link to keep the original URL.");
+        payload.url = linkData.url;
+      }
+
       const res = await getApi()[actionMethod](payload);
       const link = res.link || res;
       await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ *Success!*\n\n🔗 Short: ${env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
