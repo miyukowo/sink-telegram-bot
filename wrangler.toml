@@ -10,3 +10,7 @@ compatibility_date = "2024-06-07"
 # SINK_API_URL = "https://your-sink-domain.com"
 # SINK_API_TOKEN = "your-sink-token"
 # ALLOWED_USER_IDS = "123456789,987654321" # Comma-separated list of allowed Telegram user IDs
+
+[[kv_namespaces]]
+binding = "BOT_SESSIONS"
+id = "put_your_kv_id_here"

@@ -1,259 +1,290 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard, session } from 'grammy';
+import { conversations, createConversation } from '@grammyjs/conversations';
 import { SinkAPI } from './sink.js';
+import { KvAdapter } from './kv-adapter.js';
+
+function parseFlags(argsStr) {
+  const args = argsStr.match(/(?:[^\s"']+|["'][^"']*["'])+/g) || [];
+  const flags = {};
+  let currentKey = null;
+  const nonFlags = [];
+
+  for (const arg of args) {
+    if (arg.startsWith('--')) {
+      currentKey = arg.slice(2);
+      flags[currentKey] = true; // Default to true for boolean flags
+    } else if (currentKey) {
+      let val = arg.replace(/^["']|["']$/g, '');
+      if (val === 'false') val = false;
+      if (val === 'true') val = true;
+      if (!isNaN(val) && val.trim() !== '') val = Number(val);
+      
+      if (flags[currentKey] === true) {
+        flags[currentKey] = val;
+      } else {
+        flags[currentKey] += ` ${val}`;
+      }
+      currentKey = null; // Reset to expect next flag
+    } else {
+      nonFlags.push(arg.replace(/^["']|["']$/g, ''));
+    }
+  }
+
+  // Group geo fields
+  const payload = {};
+  for (const key in flags) {
+    if (key.startsWith('geo.')) {
+      if (!payload.geo) payload.geo = {};
+      payload.geo[key.split('.')[1].toUpperCase()] = flags[key];
+    } else {
+      payload[key] = flags[key];
+    }
+  }
+  return { payload, nonFlags };
+}
+
+// Conversation Builder
+async function createLinkConversation(conversation, ctx) {
+  await ctx.reply("Let's create a link! First, what is the target URL?");
+  const urlCtx = await conversation.wait();
+  const url = urlCtx.message?.text;
+  if (!url) return ctx.reply("Action cancelled.");
+
+  await ctx.reply("Do you want a custom slug? (Type the slug, or 'skip' to auto-generate)");
+  const slugCtx = await conversation.wait();
+  const slugInput = slugCtx.message?.text;
+  const slug = slugInput.toLowerCase() !== 'skip' ? slugInput : undefined;
+
+  await ctx.reply("Any comment/note for this link? (Type note, or 'skip')");
+  const commentCtx = await conversation.wait();
+  const commentInput = commentCtx.message?.text;
+  const comment = commentInput.toLowerCase() !== 'skip' ? commentInput : undefined;
+
+  await ctx.reply("Do you want to add a password? (Type password, or 'skip')");
+  const pwdCtx = await conversation.wait();
+  const pwdInput = pwdCtx.message?.text;
+  const password = pwdInput.toLowerCase() !== 'skip' ? pwdInput : undefined;
+
+  const payload = { url, slug, comment, password };
+
+  const msg = await ctx.reply('⏳ Creating link...');
+  try {
+    const api = new SinkAPI(process.env.SINK_API_URL, process.env.SINK_API_TOKEN);
+    const res = await api.createLink(payload);
+    const link = res.link || res;
+    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Link Created!**\n\n🔗 Short: ${process.env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
+  } catch (e) {
+    await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Failed: ${e.message}`);
+  }
+}
 
 export function createBot(token, env) {
   const bot = new Bot(token);
-  
-  // Access control middleware
+  // Store env in process.env for conversation scope
+  process.env.SINK_API_URL = env.SINK_API_URL;
+  process.env.SINK_API_TOKEN = env.SINK_API_TOKEN;
+
   bot.use(async (ctx, next) => {
     const allowedUsersStr = env.ALLOWED_USER_IDS || '';
     const allowedUsers = allowedUsersStr.split(',').map(u => u.trim()).filter(Boolean);
-    
     if (allowedUsers.length > 0) {
       const userId = ctx.from?.id.toString();
-      if (!userId || !allowedUsers.includes(userId)) {
-        console.warn(`Unauthorized access attempt from user ID: ${userId}`);
-        return; // Silently ignore unauthorized users
-      }
-    } else {
-      // If no ALLOWED_USER_IDS is set, maybe warn them but allow.
-      // We will allow it but advise to set it.
+      if (!userId || !allowedUsers.includes(userId)) return;
     }
     await next();
   });
 
-  const getSinkApi = () => {
-    return new SinkAPI(env.SINK_API_URL, env.SINK_API_TOKEN);
-  };
+  if (env.BOT_SESSIONS) {
+    bot.use(session({
+      initial: () => ({}),
+      storage: new KvAdapter(env.BOT_SESSIONS)
+    }));
+    bot.use(conversations());
+    bot.use(createConversation(createLinkConversation, 'create_chat'));
+  }
 
-  // Error boundary
+  const getApi = () => new SinkAPI(env.SINK_API_URL, env.SINK_API_TOKEN);
+
   bot.catch((err) => {
-    console.error(`Error while handling update ${err.ctx.update.update_id}:`);
     console.error(err.error);
-    err.ctx.reply(`❌ An error occurred: ${err.error.message || err.error}`).catch(() => {});
+    err.ctx.reply(`❌ Error: ${err.error.message || err.error}`).catch(() => {});
   });
 
-  // Welcome / Menu
+  // Welcome
   bot.command('start', async (ctx) => {
     const keyboard = new InlineKeyboard()
       .text('📊 Stats', 'action_stats')
       .text('📋 List Links', 'action_list')
       .row()
-      .text('💾 Trigger Backup', 'action_backup');
+      .text('💾 Backup KV', 'action_backup');
       
     await ctx.reply(
-      `👋 Welcome to Sink Bot!\n\n` +
-      `Here are the available commands:\n` +
-      `➕ /create <url> [slug] [comment] - Create a link\n` +
-      `🔍 /query <slug> - Get link details\n` +
-      `🗑 /delete <slug> - Delete a link\n` +
-      `🤖 /ai_slug <url> - Generate AI slug\n` +
-      `📊 /stats - View statistics\n\n` +
-      `Or use the menu below:`,
+      `👋 Welcome to Sink Bot V2!\n\n` +
+      `Commands:\n` +
+      `➕ /create_chat - Create link step-by-step\n` +
+      `➕ /create <url> [--slug xyz] [--password 123]\n` +
+      `✏️ /edit <slug> <url> [--password 123]\n` +
+      `♻️ /upsert <slug> <url>\n` +
+      `🔍 /query <slug> - Get details\n` +
+      `🔎 /search <text>\n` +
+      `🗑 /delete <slug>\n\n` +
+      `**Advanced:**\n` +
+      `/metrics, /views, /events, /locations, /export, /import`,
       { reply_markup: keyboard }
     );
   });
 
-  bot.command('help', async (ctx) => {
-    await ctx.reply(
-      `📚 **Sink Bot Help**\n\n` +
-      `**Create Link:**\n\`/create https://example.com\`\n\`/create https://example.com myslug\`\n\`/create https://example.com myslug "My custom comment"\`\n\n` +
-      `**Get Link:**\n\`/query myslug\`\n\n` +
-      `**Delete Link:**\n\`/delete myslug\`\n\n` +
-      `**AI Slug:**\n\`/ai_slug https://example.com\`\n\n` +
-      `**List Links:**\n\`/list\`\n\n` +
-      `**Stats:**\n\`/stats\``,
-      { parse_mode: 'Markdown' }
-    );
+  bot.command('create_chat', async (ctx) => {
+    if (!env.BOT_SESSIONS) return ctx.reply("❌ KV binding `BOT_SESSIONS` is not configured.");
+    await ctx.conversation.enter('create_chat');
   });
 
-  // Create Link
-  bot.command('create', async (ctx) => {
-    const args = ctx.match.split(/\s+/);
-    if (!ctx.match || args.length === 0 || !args[0]) {
-      return ctx.reply('❌ Usage: `/create <url> [slug] [comment]`\nExample: `/create https://example.com myslug "My comment"`', { parse_mode: 'Markdown' });
-    }
-
-    const url = args[0];
-    const slug = args[1];
+  const handleLinkAction = async (ctx, actionName, actionMethod) => {
+    const match = ctx.match.trim();
+    if (!match) return ctx.reply(`❌ Usage: /${actionName} <url or slug depending on command> [--flags]`);
     
-    // Parse comment which might be in quotes
-    let comment = undefined;
-    const commentMatch = ctx.match.match(/["']([^"']+)["']/);
-    if (commentMatch) {
-      comment = commentMatch[1];
-    } else if (args.length > 2) {
-      comment = args.slice(2).join(' ');
+    const { payload, nonFlags } = parseFlags(match);
+    
+    if (actionName === 'create') {
+      payload.url = nonFlags[0];
+      if (nonFlags[1] && !payload.slug) payload.slug = nonFlags[1];
+    } else {
+      payload.slug = nonFlags[0];
+      if (nonFlags[1]) payload.url = nonFlags[1];
     }
 
-    const api = getSinkApi();
-    const payload = { url };
-    if (slug) payload.slug = slug;
-    if (comment) payload.comment = comment;
+    if (!payload.url && actionName !== 'edit') return ctx.reply("❌ Target URL is required.");
 
+    const msg = await ctx.reply('⏳ Processing...');
     try {
-      const msg = await ctx.reply('⏳ Creating link...');
-      const res = await api.createLink(payload);
+      const res = await getApi()[actionMethod](payload);
       const link = res.link || res;
-      const shortUrl = `${env.SINK_API_URL}/${link.slug}`;
-      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Link Created!**\n\n🔗 Short: ${shortUrl}\n🎯 Target: ${link.url}\n🏷 Slug: \`${link.slug}\`\n📝 Comment: ${link.comment || 'N/A'}`, { parse_mode: 'Markdown' });
+      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Success!**\n\n🔗 Short: ${env.SINK_API_URL}/${link.slug}\n🎯 Target: ${link.url}`, { parse_mode: 'Markdown' });
     } catch (e) {
-      await ctx.reply(`❌ Failed to create link: ${e.message}`);
+      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Failed: ${e.message}`);
     }
-  });
+  };
 
-  // Query Link
+  bot.command('create', (ctx) => handleLinkAction(ctx, 'create', 'createLink'));
+  bot.command('edit', (ctx) => handleLinkAction(ctx, 'edit', 'editLink'));
+  bot.command('upsert', (ctx) => handleLinkAction(ctx, 'upsert', 'upsertLink'));
+
   bot.command('query', async (ctx) => {
     const slug = ctx.match.trim();
-    if (!slug) return ctx.reply('❌ Usage: `/query <slug>`', { parse_mode: 'Markdown' });
-
+    if (!slug) return ctx.reply('❌ Usage: /query <slug>');
     try {
-      const api = getSinkApi();
-      const res = await api.queryLink(slug);
+      const res = await getApi().queryLink(slug);
       const link = res.link || res;
-      
-      const shortUrl = `${env.SINK_API_URL}/${link.slug}`;
-      const text = `🔍 **Link Details:**\n\n` +
-                   `🏷 Slug: \`${link.slug}\`\n` +
-                   `🔗 Short: ${shortUrl}\n` +
-                   `🎯 Target: ${link.url}\n` +
-                   `📝 Comment: ${link.comment || 'N/A'}\n` +
-                   `📅 Created: ${new Date(link.createdAt * 1000).toLocaleString()}`;
-                   
-      const keyboard = new InlineKeyboard().text('🗑 Delete', `delete_${link.slug}`);
-      await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
-    } catch (e) {
-      await ctx.reply(`❌ Failed to query link: ${e.message}`);
-    }
+      await ctx.reply(`🔍 **Details:**\nSlug: \`${link.slug}\`\nTarget: ${link.url}\nComment: ${link.comment || '-'}`, { parse_mode: 'Markdown' });
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
   });
 
-  // Delete Link
+  bot.command('search', async (ctx) => {
+    const q = ctx.match.trim();
+    if (!q) return ctx.reply('❌ Usage: /search <text>');
+    try {
+      const res = await getApi().searchLinks(q);
+      const links = res.links || res || [];
+      if (!links.length) return ctx.reply('📭 No results.');
+      const text = links.map(l => `🏷 \`${l.slug}\` -> ${l.url}`).join('\n');
+      await ctx.reply(`🔎 **Search Results:**\n\n${text}`, { parse_mode: 'Markdown', disable_web_page_preview: true });
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  });
+
   bot.command('delete', async (ctx) => {
     const slug = ctx.match.trim();
-    if (!slug) return ctx.reply('❌ Usage: `/delete <slug>`', { parse_mode: 'Markdown' });
-
+    if (!slug) return ctx.reply('❌ Usage: /delete <slug>');
     const keyboard = new InlineKeyboard()
-      .text('✅ Yes, delete it', `confirm_delete_${slug}`)
+      .text('✅ Yes', `confirm_delete_${slug}`)
       .text('❌ Cancel', 'cancel_delete');
-      
-    await ctx.reply(`Are you sure you want to delete the link \`${slug}\`?`, { parse_mode: 'Markdown', reply_markup: keyboard });
+    await ctx.reply(`Delete \`${slug}\`?`, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
-  // AI Slug
-  bot.command('ai_slug', async (ctx) => {
-    const url = ctx.match.trim();
-    if (!url) return ctx.reply('❌ Usage: `/ai_slug <url>`', { parse_mode: 'Markdown' });
-
+  // Analytics & Logs
+  bot.command('metrics', async (ctx) => {
+    const dim = ctx.match.trim() || 'os';
     try {
-      const msg = await ctx.reply('🤖 Generating slug...');
-      const api = getSinkApi();
-      const res = await api.aiSlug(url);
-      await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `🤖 **AI Suggestion:**\n\n\`${res.slug}\`\n\nUse this to create your link:\n\`/create ${url} ${res.slug}\``, { parse_mode: 'Markdown' });
-    } catch (e) {
-      await ctx.reply(`❌ Failed to generate AI slug: ${e.message}`);
+      const res = await getApi().getMetrics(dim);
+      let text = `📊 **Metrics (${dim}):**\n`;
+      (res.metrics || res).slice(0, 15).forEach(m => { text += `- ${m.element}: ${m.views}\n`; });
+      await ctx.reply(text, { parse_mode: 'Markdown' });
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  });
+
+  bot.command('events', async (ctx) => {
+    try {
+      const res = await getApi().getEvents();
+      let text = `⚡️ **Recent Events:**\n`;
+      (res.events || res).slice(0, 10).forEach(e => { text += `- \`${e.slug}\`: ${e.browser} on ${e.os}\n`; });
+      await ctx.reply(text, { parse_mode: 'Markdown' });
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  });
+
+  bot.command('export', async (ctx) => {
+    try {
+      const msg = await ctx.reply('⏳ Exporting links...');
+      const res = await getApi().exportLinks();
+      // Send as file
+      const buffer = Buffer.from(JSON.stringify(res, null, 2), 'utf-8');
+      await ctx.replyWithDocument({
+        source: buffer,
+        filename: `sink_export_${Date.now()}.json`
+      });
+      await ctx.api.deleteMessage(ctx.chat.id, msg.message_id).catch(()=>{});
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  });
+
+  bot.command('stats_export', async (ctx) => {
+    try {
+      const msg = await ctx.reply('⏳ Exporting stats...');
+      const now = Math.floor(Date.now() / 1000);
+      const res = await getApi().exportStats(now - 86400 * 30, now);
+      const buffer = Buffer.from(res, 'utf-8');
+      await ctx.replyWithDocument({
+        source: buffer,
+        filename: `stats_${Date.now()}.csv`
+      });
+      await ctx.api.deleteMessage(ctx.chat.id, msg.message_id).catch(()=>{});
+    } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
+  });
+
+  bot.on('message:document', async (ctx) => {
+    // Basic import handle
+    if (ctx.message.caption === '/import') {
+      try {
+        const file = await ctx.getFile();
+        const url = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        const msg = await ctx.reply('⏳ Importing...');
+        const res = await getApi().importLinks(data);
+        await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `✅ **Import Complete!**\nInserted: ${res.inserted || 'N/A'}`);
+      } catch (e) { await ctx.reply(`❌ Failed: ${e.message}`); }
     }
   });
 
-  // List Links
-  bot.command('list', async (ctx) => {
-    await sendLinkList(ctx, 1);
-  });
-
-  // Stats
-  bot.command('stats', async (ctx) => {
-    await sendStats(ctx);
-  });
-
-  // Callback Queries (Buttons)
+  // Callbacks for inline menus
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
-
     try {
       if (data === 'action_stats') {
-        await ctx.answerCallbackQuery();
-        await sendStats(ctx);
-      } else if (data === 'action_list') {
-        await ctx.answerCallbackQuery();
-        await sendLinkList(ctx, 1);
+        const counters = await getApi().getCounters();
+        await ctx.editMessageText(`📊 **Sink Statistics:**\n🔗 Links: ${counters.links || 0}\n👀 Clicks: ${counters.clicks || 0}\n🌍 Visitors: ${counters.uniqueVisitors || 0}`, { parse_mode: 'Markdown' });
       } else if (data === 'action_backup') {
-        const api = getSinkApi();
-        await api.triggerBackup();
-        await ctx.answerCallbackQuery({ text: '✅ Backup triggered successfully!', show_alert: true });
-      } else if (data.startsWith('delete_')) {
-        const slug = data.replace('delete_', '');
-        const keyboard = new InlineKeyboard()
-          .text('✅ Yes, delete it', `confirm_delete_${slug}`)
-          .text('❌ Cancel', 'cancel_delete');
-        await ctx.editMessageReplyMarkup({ reply_markup: keyboard });
+        await getApi().triggerBackup();
+        await ctx.answerCallbackQuery({ text: '✅ Backup triggered!', show_alert: true });
       } else if (data.startsWith('confirm_delete_')) {
         const slug = data.replace('confirm_delete_', '');
-        const api = getSinkApi();
-        await api.deleteLink(slug);
-        await ctx.editMessageText(`✅ Link \`${slug}\` deleted successfully.`, { parse_mode: 'Markdown' });
+        await getApi().deleteLink(slug);
+        await ctx.editMessageText(`✅ Deleted \`${slug}\``, { parse_mode: 'Markdown' });
       } else if (data === 'cancel_delete') {
-        await ctx.editMessageText('❌ Deletion cancelled.');
-      } else if (data.startsWith('list_page_')) {
-        const page = parseInt(data.replace('list_page_', ''), 10);
-        await sendLinkList(ctx, page, true);
+        await ctx.editMessageText('❌ Cancelled.');
       } else {
         await ctx.answerCallbackQuery();
       }
-    } catch (e) {
-      await ctx.answerCallbackQuery({ text: `❌ Error: ${e.message}`, show_alert: true });
-    }
+    } catch (e) { await ctx.answerCallbackQuery({ text: `❌ Error: ${e.message}`, show_alert: true }); }
   });
-
-  async function sendStats(ctx) {
-    const api = getSinkApi();
-    const counters = await api.getCounters();
-    
-    const text = `📊 **Sink Statistics:**\n\n` +
-                 `🔗 Total Links: **${counters.links || 0}**\n` +
-                 `👀 Total Clicks: **${counters.clicks || 0}**\n` +
-                 `🌍 Unique Visitors: **${counters.uniqueVisitors || 0}**\n`;
-                 
-    if (ctx.callbackQuery) {
-      await ctx.editMessageText(text, { parse_mode: 'Markdown' });
-    } else {
-      await ctx.reply(text, { parse_mode: 'Markdown' });
-    }
-  }
-
-  async function sendLinkList(ctx, page, isEdit = false) {
-    const api = getSinkApi();
-    const limit = 5;
-    const res = await api.listLinks(page, limit);
-    // Depending on Sink's exact response structure (e.g. { links: [...], total: ... } or just array)
-    const links = Array.isArray(res) ? res : res.links || res.records || [];
-    const total = res.total || links.length; // Approximate if no total is given
-
-    if (links.length === 0) {
-      const text = page === 1 ? '📭 No links found.' : '📭 No more links.';
-      if (isEdit) await ctx.editMessageText(text);
-      else await ctx.reply(text);
-      return;
-    }
-
-    let text = `📋 **Links (Page ${page}):**\n\n`;
-    links.forEach(link => {
-      text += `🏷 \`${link.slug}\` -> [Target](${link.url})\n`;
-    });
-
-    const keyboard = new InlineKeyboard();
-    if (page > 1) {
-      keyboard.text('⬅️ Prev', `list_page_${page - 1}`);
-    }
-    // Very basic pagination check, assuming if we get `limit` items there might be more
-    if (links.length === limit) {
-      keyboard.text('Next ➡️', `list_page_${page + 1}`);
-    }
-
-    if (isEdit) {
-      await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
-    } else {
-      await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
-    }
-  }
 
   return bot;
 }

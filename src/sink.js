@@ -85,12 +85,31 @@ export class SinkAPI {
     return this.fetchApi('/api/link/export', { method: 'GET' });
   }
 
+  async importLinks(linksData) {
+    return this.fetchApi('/api/link/import', {
+      method: 'POST',
+      body: JSON.stringify(linksData),
+    });
+  }
+
   async aiSlug(url) {
     return this.fetchApi(`/api/link/ai?url=${encodeURIComponent(url)}`, { method: 'GET' });
   }
 
   async aiOg(url, locale = 'en-US') {
     return this.fetchApi(`/api/link/og-ai?url=${encodeURIComponent(url)}&locale=${locale}`, { method: 'GET' });
+  }
+
+  async uploadImage(formData) {
+    // Note: This endpoint expects FormData or binary, fetchApi wrapper might need adjustment
+    // if sending FormData, but we'll pass headers inside options if needed.
+    const url = `${this.baseUrl}/api/upload/image`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.token}` },
+      body: formData,
+    });
+    return response.json();
   }
 
   async triggerBackup() {
@@ -108,5 +127,28 @@ export class SinkAPI {
 
   async getViews(timeframe = '7d') {
     return this.fetchApi(`/api/stats/views?timeframe=${timeframe}`, { method: 'GET' });
+  }
+
+  async getHeatmap() {
+    return this.fetchApi('/api/stats/heatmap', { method: 'GET' });
+  }
+
+  async exportStats(startAt, endAt, slug) {
+    let url = `/api/stats/export?startAt=${startAt}&endAt=${endAt}`;
+    if (slug) url += `&slug=${encodeURIComponent(slug)}`;
+    
+    // We return raw text for CSV
+    const response = await fetch(`${this.baseUrl}${url}`, {
+      headers: { 'Authorization': `Bearer ${this.token}` }
+    });
+    return response.text();
+  }
+
+  async getEvents() {
+    return this.fetchApi('/api/logs/events', { method: 'GET' });
+  }
+
+  async getLocations() {
+    return this.fetchApi('/api/logs/locations', { method: 'GET' });
   }
 }
